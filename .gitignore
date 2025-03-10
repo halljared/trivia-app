@@ -1,0 +1,12 @@
+# .gitignore
+venv/
+__pycache__/
+*.pyc
+*.pyo
+jeopardy/data/seasons/
+jeopardy/data/images/
+jeopardy/data/other_data/
+jeopardy/data/*.tsv
+opentdb/data/*
+sql/credentials.py
+.env
