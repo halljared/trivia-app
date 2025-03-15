@@ -1,0 +1,10 @@
+#separator:tab
+#html:false
+#guid column:1
+#notetype column:2
+#deck column:3
+#tags column:7
+BP5AYux?Ur	Trivia Question+++++	Trivia	"What original literary work was the movie ""A Place in the Sun"" based on?"	An American Tragedy	ARTS	
+GQ9~X_aog(	Trivia Question+++++	Trivia	N2O is more commonly known as what?	Laughing gas	SCIENCE	
+nca}E$tTSc	Trivia Question+++++	Trivia	"Who directed the 2001 film ""Mulholland Drive""?"	David Lynch	ENTERTAINMENT	
+vhG/,k2M-D	Trivia Question+++++	Trivia	How many dogs survived the sinking of the Titanic?	Three	HISTORY	
