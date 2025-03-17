@@ -39,6 +39,7 @@ def get_question():
         JSON object containing:
         - id: Question ID
         - question: The trivia question text
+        - answer: The trivia answer text
         - category: Category name
         - difficulty: Question difficulty level
     """
@@ -50,7 +51,10 @@ def get_question():
     try:
         with conn.cursor() as cursor:
             # Build query based on provided parameters
-            query = "SELECT q.id, q.question, c.name as category, q.difficulty FROM trivia_questions q JOIN categories c ON q.category_id = c.id WHERE 1=1"
+            query = """SELECT q.id, q.question, q.answer, c.name as category, q.difficulty 
+                      FROM trivia_questions q 
+                      JOIN categories c ON q.category_id = c.id 
+                      WHERE 1=1"""
             params = []
             
             if difficulty:
@@ -75,11 +79,12 @@ def get_question():
             params.append(random_index)
             
             cursor.execute(query, params)
-            question_id, question, category, difficulty = cursor.fetchone()
+            question_id, question, answer, category, difficulty = cursor.fetchone()
             
         return jsonify({
             'id': question_id,
             'question': question,
+            'answer': answer,
             'category': category,
             'difficulty': difficulty
         })
@@ -215,6 +220,7 @@ def get_category_questions(category_id):
         JSON array of question objects, each containing:
         - id: Question ID
         - question: The trivia question text
+        - answer: The trivia answer text
         - category: Category name
         - difficulty: Question difficulty level
     """
@@ -231,7 +237,7 @@ def get_category_questions(category_id):
             
             # Get random questions from this category
             query = """
-                SELECT q.id, q.question, c.name as category, q.difficulty
+                SELECT q.id, q.question, q.answer, c.name as category, q.difficulty
                 FROM trivia_questions q
                 JOIN categories c ON q.category_id = c.id
                 WHERE q.category_id = %s
@@ -243,8 +249,9 @@ def get_category_questions(category_id):
                 {
                     'id': row[0],
                     'question': row[1],
-                    'category': row[2],
-                    'difficulty': row[3]
+                    'answer': row[2],
+                    'category': row[3],
+                    'difficulty': row[4]
                 }
                 for row in cursor.fetchall()
             ]
