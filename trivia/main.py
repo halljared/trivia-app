@@ -4,10 +4,12 @@ import random
 from fuzzywuzzy import fuzz
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = Flask(__name__)
+CORS(app)
 
 DB_NAME = os.getenv('DB_NAME')
 DB_USER = os.getenv('DB_USER')
@@ -195,6 +197,62 @@ def get_active_categories():
             ]
             
         return jsonify(categories)
+    finally:
+        conn.close()
+
+@app.route('/api/category/<int:category_id>/questions', methods=['GET'])
+def get_category_questions(category_id):
+    """
+    Get multiple random questions from a specific category.
+    
+    Path Parameters:
+        category_id: ID of the category to get questions from
+    
+    Query Parameters:
+        count (optional): Number of questions to return (default: 10, max: 50)
+    
+    Returns:
+        JSON array of question objects, each containing:
+        - id: Question ID
+        - question: The trivia question text
+        - category: Category name
+        - difficulty: Question difficulty level
+    """
+    count = min(request.args.get('count', default=10, type=int), 50)  # Cap at 50 questions
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # First verify the category exists
+            cursor.execute("SELECT name FROM categories WHERE id = %s", (category_id,))
+            category_result = cursor.fetchone()
+            if not category_result:
+                return jsonify({"error": "Category not found"}), 404
+            
+            # Get random questions from this category
+            query = """
+                SELECT q.id, q.question, c.name as category, q.difficulty
+                FROM trivia_questions q
+                JOIN categories c ON q.category_id = c.id
+                WHERE q.category_id = %s
+                ORDER BY RANDOM()
+                LIMIT %s
+            """
+            cursor.execute(query, (category_id, count))
+            questions = [
+                {
+                    'id': row[0],
+                    'question': row[1],
+                    'category': row[2],
+                    'difficulty': row[3]
+                }
+                for row in cursor.fetchall()
+            ]
+            
+            if not questions:
+                return jsonify({"error": "No questions found in this category"}), 404
+                
+        return jsonify(questions)
     finally:
         conn.close()
 
