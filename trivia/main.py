@@ -26,6 +26,20 @@ def get_db_connection():
 
 @app.route('/api/question', methods=['GET'])
 def get_question():
+    """
+    Get a random trivia question.
+    
+    Query Parameters:
+        difficulty (optional): Filter by difficulty level ('easy', 'medium', 'hard')
+        category_id (optional): Filter by category ID (integer)
+    
+    Returns:
+        JSON object containing:
+        - id: Question ID
+        - question: The trivia question text
+        - category: Category name
+        - difficulty: Question difficulty level
+    """
     # Get difficulty parameter (if provided)
     difficulty = request.args.get('difficulty')
     category_id = request.args.get('category_id', type=int)
@@ -72,6 +86,19 @@ def get_question():
 
 @app.route('/api/check-answer', methods=['POST'])
 def check_answer():
+    """
+    Check if the provided answer matches the correct answer for a question.
+    
+    Request Body (JSON):
+        question_id: ID of the question being answered
+        answer: User's answer to check
+    
+    Returns:
+        JSON object containing:
+        - correct: Boolean indicating if answer is correct
+        - score: Fuzzy matching score (0-100)
+        - correct_answer: The actual correct answer
+    """
     data = request.get_json()
     if not data or 'answer' not in data or 'question_id' not in data:
         return jsonify({'error': 'Missing answer or question_id'}), 400
@@ -101,6 +128,14 @@ def check_answer():
 
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
+    """
+    Get all available trivia categories.
+    
+    Returns:
+        JSON array of category objects, each containing:
+        - id: Category ID
+        - name: Category name
+    """
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
@@ -113,8 +148,55 @@ def get_categories():
 
 @app.route('/api/difficulties', methods=['GET'])
 def get_difficulties():
+    """
+    Get all available difficulty levels.
+    
+    Returns:
+        JSON array of difficulty levels: ['easy', 'medium', 'hard']
+    """
     # Return the available difficulty levels
     return jsonify(['easy', 'medium', 'hard'])
+
+@app.route('/api/categories/active', methods=['GET'])
+def get_active_categories():
+    """
+    Get categories that have a minimum number of questions.
+    
+    Query Parameters:
+        min_questions (optional): Minimum number of questions required (default: 80)
+    
+    Returns:
+        JSON array of category objects, each containing:
+        - id: Category ID
+        - name: Category name
+        - question_count: Number of questions in category
+    """
+    min_questions = request.args.get('min_questions', default=80, type=int)
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            query = """
+                SELECT c.id, c.name, COUNT(q.id) as question_count
+                FROM categories c
+                LEFT JOIN trivia_questions q ON c.id = q.category_id
+                GROUP BY c.id, c.name
+                HAVING COUNT(q.id) >= %s
+                ORDER BY c.name
+            """
+            cursor.execute(query, (min_questions,))
+            categories = [
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "question_count": row[2]
+                }
+                for row in cursor.fetchall()
+            ]
+            
+        return jsonify(categories)
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
     app.run(debug=True)

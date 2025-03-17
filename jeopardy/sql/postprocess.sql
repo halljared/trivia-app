@@ -34,15 +34,10 @@ SELECT
     c.id AS category_id,
     CASE
         -- Handle difficulty based on air_date, round, and clue_value
-        WHEN (
+        WHEN 
             -- Older episodes format (pre-November 2001)
             TO_DATE(it.air_date, 'YYYY-MM-DD') < '2001-11-26'::DATE 
-            OR
-            -- Some special older format indicator if needed
-            (it.round = 1 AND it.clue_value IN (100, 200, 300, 400, 500))
-            OR 
-            (it.round = 2 AND it.clue_value IN (200, 400, 600, 800, 1000))
-        ) THEN
+        THEN
             -- For older episodes, use position-based approach
             CASE
                 WHEN (
