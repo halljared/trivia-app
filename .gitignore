@@ -10,3 +10,8 @@ jeopardy/data/*.tsv
 opentdb/data/*
 sql/credentials.py
 .env
+jeopardy/data/categories/normalized.csv
+jeopardy/stragglers.csv
+jeopardy/fixed_categories.jsonl
+jeopardy/extras.json
+jeopardy/extracted.json
