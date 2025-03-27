@@ -1,9 +1,12 @@
 import os
 import psycopg2
 import random
+import secrets
+import bcrypt
+from datetime import datetime, timedelta
 from fuzzywuzzy import fuzz
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -260,6 +263,185 @@ def get_category_questions(category_id):
                 return jsonify({"error": "No questions found in this category"}), 404
                 
         return jsonify(questions)
+    finally:
+        conn.close()
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """
+    Register a new user.
+    
+    Request Body (JSON):
+        username: Username for the new account
+        email: Email address
+        password: Password (will be hashed)
+    
+    Returns:
+        JSON object containing success message and user info
+    """
+    data = request.get_json()
+    if not data or not all(k in data for k in ['username', 'email', 'password']):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Check if username or email already exists
+            cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s", 
+                         (data['username'], data['email']))
+            if cursor.fetchone():
+                return jsonify({'error': 'Username or email already exists'}), 409
+
+            # Hash password
+            password_hash = bcrypt.hashpw(data['password'].encode('utf-8'), bcrypt.gensalt())
+            
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO users (username, email, password_hash)
+                VALUES (%s, %s, %s)
+                RETURNING id, username, email
+            """, (data['username'], data['email'], password_hash.decode('utf-8')))
+            
+            user = cursor.fetchone()
+            conn.commit()
+            
+            return jsonify({
+                'message': 'User registered successfully',
+                'user': {
+                    'id': user[0],
+                    'username': user[1],
+                    'email': user[2]
+                }
+            })
+    finally:
+        conn.close()
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """
+    Login a user and create a session.
+    
+    Request Body (JSON):
+        email: User's email
+        password: User's password
+    
+    Returns:
+        JSON object containing session token and user info
+    """
+    data = request.get_json()
+    if not data or not all(k in data for k in ['email', 'password']):
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Get user by email
+            cursor.execute("""
+                SELECT id, username, email, password_hash 
+                FROM users 
+                WHERE email = %s
+            """, (data['email'],))
+            
+            user = cursor.fetchone()
+            if not user or not bcrypt.checkpw(data['password'].encode('utf-8'), 
+                                           user[3].encode('utf-8')):
+                return jsonify({'error': 'Invalid credentials'}), 401
+
+            # Generate session token
+            session_token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(days=7)
+
+            # Create session
+            cursor.execute("""
+                INSERT INTO user_sessions (user_id, session_token, expires_at)
+                VALUES (%s, %s, %s)
+            """, (user[0], session_token, expires_at))
+
+            # Update last login
+            cursor.execute("""
+                UPDATE users 
+                SET last_login = CURRENT_TIMESTAMP 
+                WHERE id = %s
+            """, (user[0],))
+            
+            conn.commit()
+
+            return jsonify({
+                'session_token': session_token,
+                'user': {
+                    'id': user[0],
+                    'username': user[1],
+                    'email': user[2]
+                }
+            })
+    finally:
+        conn.close()
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    """
+    Logout a user by invalidating their session.
+    
+    Headers:
+        Authorization: Bearer <session_token>
+    
+    Returns:
+        JSON object containing success message
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Missing or invalid authorization header'}), 401
+
+    session_token = auth_header.split(' ')[1]
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM user_sessions WHERE session_token = %s", (session_token,))
+            conn.commit()
+            
+            return jsonify({'message': 'Logged out successfully'})
+    finally:
+        conn.close()
+
+@app.route('/api/auth/me', methods=['GET'])
+def get_current_user():
+    """
+    Get the current user's information.
+    
+    Headers:
+        Authorization: Bearer <session_token>
+    
+    Returns:
+        JSON object containing user information
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Missing or invalid authorization header'}), 401
+
+    session_token = auth_header.split(' ')[1]
+    
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT u.id, u.username, u.email, u.created_at, u.last_login
+                FROM users u
+                JOIN user_sessions s ON u.id = s.user_id
+                WHERE s.session_token = %s AND s.expires_at > CURRENT_TIMESTAMP
+            """, (session_token,))
+            
+            user = cursor.fetchone()
+            if not user:
+                return jsonify({'error': 'Invalid or expired session'}), 401
+
+            return jsonify({
+                'id': user[0],
+                'username': user[1],
+                'email': user[2],
+                'created_at': user[3].isoformat(),
+                'last_login': user[4].isoformat() if user[4] else None
+            })
     finally:
         conn.close()
 
