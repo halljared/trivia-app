@@ -43,6 +43,63 @@ CREATE TABLE IF NOT EXISTS trivia_questions (
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 
--- Create indexes for better performance
+-- Create events table
+CREATE TABLE IF NOT EXISTS events (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    name VARCHAR(255) NOT NULL,
+    created_by INTEGER REFERENCES users(id),
+    event_date TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'draft', -- draft, active, completed, etc.
+    description TEXT
+);
+
+-- Create rounds table
+CREATE TABLE IF NOT EXISTS rounds (
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+    category_id INTEGER REFERENCES categories(id),
+    round_number INTEGER NOT NULL,
+    name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(event_id, round_number)
+);
+
+-- Create user_generated_questions table
+CREATE TABLE IF NOT EXISTS user_generated_questions (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    category_id INTEGER REFERENCES categories(id),
+    difficulty VARCHAR(10) NOT NULL,    -- 'easy', 'medium', or 'hard'
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'active', -- active, flagged, deleted, etc.
+    notes TEXT
+);
+
+-- Create round_questions table to link questions to rounds
+CREATE TABLE IF NOT EXISTS round_questions (
+    id SERIAL PRIMARY KEY,
+    round_id INTEGER REFERENCES rounds(id) ON DELETE CASCADE,
+    question_number INTEGER NOT NULL,
+    -- These next two columns are mutually exclusive (only one should have a value)
+    preset_question_id INTEGER REFERENCES trivia_questions(id),
+    user_question_id INTEGER REFERENCES user_generated_questions(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(round_id, question_number),
+    -- Ensure only one question type is referenced
+    CONSTRAINT question_type_check CHECK (
+        (preset_question_id IS NULL AND user_question_id IS NOT NULL) OR
+        (preset_question_id IS NOT NULL AND user_question_id IS NULL)
+    )
+);
+
+-- Create helpful indexes
 CREATE INDEX IF NOT EXISTS idx_trivia_questions_difficulty ON trivia_questions(difficulty);
 CREATE INDEX IF NOT EXISTS idx_trivia_questions_category_id ON trivia_questions(category_id);
+CREATE INDEX IF NOT EXISTS idx_round_questions_preset_id ON round_questions(preset_question_id);
+CREATE INDEX IF NOT EXISTS idx_round_questions_user_id ON round_questions(user_question_id);
+CREATE INDEX IF NOT EXISTS idx_rounds_event_id ON rounds(event_id);
+CREATE INDEX IF NOT EXISTS idx_user_generated_questions_category ON user_generated_questions(category_id);

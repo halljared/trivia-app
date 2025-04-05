@@ -445,5 +445,156 @@ def get_current_user():
     finally:
         conn.close()
 
+
+@app.route('/api/events/<int:event_id>', methods=['GET'])
+def get_event(event_id):
+    """
+    Fetch an event and its associated rounds by event ID.
+    
+    Args:
+        event_id (int): The ID of the event to retrieve
+    
+    Returns:
+        JSON: Event details including its rounds
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # SQL query that joins events with rounds and aggregates round data as JSON
+            query = """
+                SELECT e.id, e.name, e.event_date, e.status, e.description,
+                json_agg(json_build_object(
+                    'id', r.id,
+                    'round_number', r.round_number,
+                    'name', r.name,
+                    'created_at', r.created_at
+                )) AS rounds
+                FROM events e
+                LEFT JOIN rounds r ON e.id = r.event_id
+                WHERE e.id = %s
+                GROUP BY e.id
+            """
+            cursor.execute(query, (event_id,))
+            event = cursor.fetchone()
+
+            # Convert database row to dictionary with proper type handling
+            event_dict = {
+                'id': event[0],
+                'name': event[1],
+                'event_date': event[2].isoformat() if event[2] else None,
+                'status': event[3],
+                'description': event[4],
+                'rounds': event[5] if event[5] else []
+            }
+
+            return jsonify(event_dict)
+    finally:
+        conn.close()
+
+
+@app.route('/api/rounds/<int:round_id>/questions', methods=['GET'])
+def get_round_questions(round_id):
+    """
+    Fetch all questions for a specific round.
+    
+    Args:
+        round_id (int): The ID of the round to retrieve questions for
+    
+    Returns:
+        JSON: List of questions in the round with their details
+    """
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # SQL query that joins round_questions with both preset and user-generated questions
+            query = """
+                SELECT 
+                    rq.question_number,
+                    COALESCE(q.question, uq.question) as question,
+                    COALESCE(q.answer, uq.answer) as answer,
+                    COALESCE(q.difficulty, uq.difficulty) as difficulty,
+                    c.name as category
+                FROM round_questions rq
+                LEFT JOIN trivia_questions q ON rq.preset_question_id = q.id
+                LEFT JOIN user_generated_questions uq ON rq.user_question_id = uq.id
+                LEFT JOIN categories c ON COALESCE(q.category_id, uq.category_id) = c.id
+                WHERE rq.round_id = %s
+                ORDER BY rq.question_number
+            """
+            cursor.execute(query, (round_id,))
+            questions = cursor.fetchall()
+
+            # Convert database rows to a list of dictionaries
+            questions_list = [{
+                'question_number': q[0],
+                'question': q[1],
+                'answer': q[2],
+                'difficulty': q[3],
+                'category': q[4]
+            } for q in questions]
+
+            return jsonify(questions_list)
+    finally:
+        conn.close()
+
+
+@app.route('/api/questions/user-generated', methods=['POST'])
+def add_user_generated_question():
+    """
+    Add a new user-generated question to the database.
+    
+    Expected JSON payload:
+    {
+        "question": "Question text",
+        "answer": "Answer text",
+        "category_id": 1,
+        "difficulty": "easy|medium|hard",
+        "created_by": "user_id"
+    }
+    
+    Returns:
+        JSON: ID of the new question and success message (201)
+        or error message (400/500)
+    """
+    data = request.get_json()
+    question = data.get('question')
+    answer = data.get('answer')
+    category_id = data.get('category_id')
+    difficulty = data.get('difficulty')
+    created_by = data.get('created_by')
+
+    # Validate required fields
+    if not question or not answer or not category_id or not difficulty:
+        return jsonify({'error': 'Missing required fields. Question, answer, category_id, and difficulty are required.'}), 400
+    
+    # Validate difficulty is one of the allowed values
+    if difficulty not in ['easy', 'medium', 'hard']:
+        return jsonify({'error': 'Invalid difficulty. Must be one of: easy, medium, hard'}), 400
+    
+    # If created_by is required but not provided
+    if not created_by:
+        return jsonify({'error': 'User ID (created_by) is required'}), 400
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Insert the new question and return its ID
+            query = """
+                INSERT INTO user_generated_questions (question, answer, category_id, difficulty, created_by)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """
+            cursor.execute(query, (question, answer, category_id, difficulty, created_by))
+            new_question_id = cursor.fetchone()[0]
+            conn.commit()
+
+            return jsonify({'id': new_question_id, 'message': 'Question added successfully'}), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     app.run(debug=True)
