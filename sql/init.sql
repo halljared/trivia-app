@@ -96,6 +96,26 @@ CREATE TABLE IF NOT EXISTS round_questions (
     )
 );
 
+-- Create a view to normalize the questions for the frontend
+CREATE OR REPLACE VIEW normalized_questions_view AS
+SELECT
+    rq.round_id,
+    rq.id AS round_question_id,
+    rq.question_number,
+    COALESCE(rq.preset_question_id, rq.user_question_id) AS question_id,
+    CASE WHEN rq.preset_question_id IS NOT NULL THEN 'preset' ELSE 'user' END AS question_type,
+    COALESCE(tq.question, ugq.question) AS question,
+    COALESCE(tq.answer, ugq.answer) AS answer,
+    COALESCE(tq.difficulty, ugq.difficulty) AS difficulty,
+    COALESCE(tq_cat.id, ugq_cat.id) AS category_id,
+    COALESCE(tq_cat.name, ugq_cat.name, 'Uncategorized') AS category_name
+FROM
+    round_questions rq
+LEFT JOIN trivia_questions tq ON rq.preset_question_id = tq.id
+LEFT JOIN user_generated_questions ugq ON rq.user_question_id = ugq.id
+LEFT JOIN categories tq_cat ON tq.category_id = tq_cat.id
+LEFT JOIN categories ugq_cat ON ugq.category_id = ugq_cat.id;
+
 -- Create helpful indexes
 CREATE INDEX IF NOT EXISTS idx_trivia_questions_difficulty ON trivia_questions(difficulty);
 CREATE INDEX IF NOT EXISTS idx_trivia_questions_category_id ON trivia_questions(category_id);

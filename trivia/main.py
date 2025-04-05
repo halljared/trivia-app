@@ -8,9 +8,10 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, UniqueConstraint, CheckConstraint, select, case, Integer # Import necessary SQLAlchemy functions/classes
-from sqlalchemy.orm import joinedload, Mapped, mapped_column, relationship # Use newer SQLAlchemy 2.0 style
+from sqlalchemy import func, UniqueConstraint, CheckConstraint, select # Import necessary SQLAlchemy functions/classes
+from sqlalchemy.orm import joinedload, Mapped, mapped_column, relationship, selectinload # Use newer SQLAlchemy 2.0 style
 from typing import List, Optional # For type hinting
+from functools import wraps
 
 # --- Load Environment Variables ---
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -106,6 +107,29 @@ class Event(db.Model):
     creator: Mapped["User"] = relationship(back_populates="events_created", foreign_keys=[created_by])
     rounds: Mapped[List["Round"]] = relationship(back_populates="event", cascade="all, delete-orphan", order_by="Round.round_number")
 
+class NormalizedQuestion(db.Model):
+    __tablename__ = 'normalized_questions_view'
+    
+    round_question_id: Mapped[int] = mapped_column(primary_key=True)
+    round_id: Mapped[int] = mapped_column(db.ForeignKey('rounds.id'))
+    question_number: Mapped[int] = mapped_column()
+    question_id: Mapped[int] = mapped_column()
+    question_type: Mapped[str] = mapped_column(db.String(10))
+    question: Mapped[str] = mapped_column(db.Text)
+    answer: Mapped[str] = mapped_column(db.Text)
+    difficulty: Mapped[str] = mapped_column(db.String(10))
+    category_id: Mapped[Optional[int]] = mapped_column()
+    category_name: Mapped[str] = mapped_column(db.String(256))
+
+    __table_args__ = (
+        {'info': {'is_view': True}}  # Mark this as a view
+    )
+
+    # Make it effectively immutable
+    __mapper_args__ = {
+        'confirm_deleted_rows': False
+    }
+
 class Round(db.Model):
     __tablename__ = 'rounds'
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -121,6 +145,11 @@ class Round(db.Model):
     event: Mapped["Event"] = relationship(back_populates="rounds")
     category: Mapped[Optional["Category"]] = relationship(back_populates="rounds")
     questions: Mapped[List["RoundQuestion"]] = relationship(back_populates="round", cascade="all, delete-orphan", order_by="RoundQuestion.question_number")
+    normalized_questions: Mapped[List["NormalizedQuestion"]] = relationship(
+        primaryjoin="Round.id == NormalizedQuestion.round_id",
+        order_by="NormalizedQuestion.question_number",
+        viewonly=True # Crucial: Indicates this relationship is read-only via the view
+    )
 
 
 class UserGeneratedQuestion(db.Model):
@@ -181,6 +210,24 @@ def get_user_from_token(session_token: str) -> Optional[User]:
         .filter(UserSession.expires_at > datetime.now(timezone.utc)) # Use timezone-aware comparison
     )
     return session.user if session else None
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid authorization header'}), 401
+
+        session_token = auth_header.split(' ')[1]
+        user = get_user_from_token(session_token)
+        
+        if not user:
+            return jsonify({'error': 'Invalid or expired session'}), 401
+            
+        # Add the user to the request context
+        request.user = user
+        return f(*args, **kwargs)
+    return decorated
 
 # --- API Routes ---
 
@@ -397,6 +444,7 @@ def login():
 
 
 @app.route('/api/auth/logout', methods=['POST'])
+@require_auth
 def logout():
     """Logout a user by invalidating their session."""
     auth_header = request.headers.get('Authorization')
@@ -420,17 +468,11 @@ def logout():
 
 
 @app.route('/api/auth/me', methods=['GET'])
+@require_auth
 def get_current_user():
     """Get the current authenticated user's information."""
-    auth_header = request.headers.get('Authorization')
-    session_token = None
-    if auth_header and auth_header.startswith('Bearer '):
-        session_token = auth_header.split(' ')[1]
-
-    if not session_token:
-         return jsonify({'error': 'Missing or invalid authorization header'}), 401
-
-    user = get_user_from_token(session_token)
+    # Get the user from the request context
+    user = request.user
 
     if not user:
         return jsonify({'error': 'Invalid or expired session'}), 401
@@ -447,6 +489,7 @@ def get_current_user():
 # --- Event/Round/Question Routes ---
 
 @app.route('/api/events/<int:event_id>', methods=['GET'])
+@require_auth
 def get_event(event_id):
     """Fetch an event and its associated rounds by event ID."""
     # Eager load rounds to avoid N+1 queries when accessing event.rounds
@@ -478,52 +521,46 @@ def get_event(event_id):
     })
 
 @app.route('/api/rounds/<int:round_id>/questions', methods=['GET'])
+@require_auth
 def get_round_questions(round_id):
-    """Fetch all questions for a specific round."""
-    # Eager load the related preset and user questions, and their categories
-    round_questions = db.session.scalars(
-        select(RoundQuestion)
-        .options(
-            joinedload(RoundQuestion.preset_question).joinedload(TriviaQuestion.category),
-            joinedload(RoundQuestion.user_question).joinedload(UserGeneratedQuestion.category)
+    """Fetch all questions for a specific round using a database function."""
+
+    # Optional but recommended: Check if the round itself exists first
+    # This gives a more specific 404 if the round ID is invalid.
+    round_exists = db.session.get(Round, round_id)
+    if not round_exists:
+         return jsonify({'error': f'Round with id {round_id} not found'}), 404
+
+    try:
+        stmt = (
+            select(Round)
+            .where(Round.id == round_id)
+            .options(
+                selectinload(Round.questions) # Just load the relationship to the view!
+            )
         )
-        .filter_by(round_id=round_id)
-        .order_by(RoundQuestion.question_number) # Order maintained from model definition but explicit is fine
-    ).all()
-
-    if not round_questions:
-        # Check if round exists at all
-        round_exists = db.session.get(Round, round_id)
-        if not round_exists:
-            return jsonify({'error': f'Round with id {round_id} not found'}), 404
-        else:
-            return jsonify([]) # Round exists but has no questions
-
-    questions_list = []
-    for rq in round_questions:
-        # Determine which question type it is and get details
-        question_obj = None
-        category_name = None
-        if rq.preset_question:
-            question_obj = rq.preset_question
-            category_name = question_obj.category.name if question_obj.category else None
-        elif rq.user_question:
-            question_obj = rq.user_question
-            category_name = question_obj.category.name if question_obj.category else None
-
-        if question_obj: # Should always be true due to CHECK constraint, but good practice
-             questions_list.append({
-                'question_number': rq.question_number,
-                'question': question_obj.question,
-                'answer': question_obj.answer,
-                'difficulty': question_obj.difficulty,
-                'category': category_name
-            })
-
-    return jsonify(questions_list)
+        round_obj = db.session.scalars(stmt).first()
+        questions_list = [{
+            'round_question_id': q.round_question_id,
+            'round_id': q.round_id,
+            'question_number': q.question_number,
+            'question_id': q.question_id,
+            'question_type': q.question_type,
+            'question': q.question,
+            'answer': q.answer,
+            'difficulty': q.difficulty,
+            'category_id': q.category_id,
+            'category_name': q.category_name
+        } for q in round_obj.normalized_questions]
+        return jsonify(questions_list)
+    except Exception as e:
+        # Log the error for debugging
+        app.logger.error(f"Database error fetching questions for round {round_id}: {e}")
+        return jsonify({'error': 'Failed to retrieve questions due to a database error'}), 500
 
 
 @app.route('/api/questions/user-generated', methods=['POST'])
+@require_auth
 def add_user_generated_question():
     """Add a new user-generated question."""
     data = request.get_json()
