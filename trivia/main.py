@@ -609,6 +609,97 @@ def add_user_generated_question():
         # Provide a more specific error if possible (e.g., FK violation)
         return jsonify({'error': f'Could not add question: {e}'}), 500
 
+@app.route('/api/events', methods=['POST'])  # POST is more appropriate since we're primarily creating/modifying a resource
+@require_auth
+def create_or_update_event():
+    """Create a new event or update an existing one for the authenticated user."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No input data provided'}), 400
+
+    # Extract event data with defaults where appropriate
+    event_id = data.get('id')  # Optional - if provided, we'll update instead of create
+    name = data.get('name')
+    event_date = data.get('event_date')  # Optional
+    description = data.get('description')  # Optional
+    status = data.get('status', 'draft')  # Default to 'draft' if not provided
+
+    # Validate required fields
+    if not name:
+        return jsonify({'error': 'Event name is required'}), 400
+
+    # Convert event_date string to datetime if provided
+    if event_date:
+        try:
+            event_date = datetime.fromisoformat(event_date)
+            if event_date.tzinfo is None:
+                event_date = event_date.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return jsonify({'error': 'Invalid event_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS+HH:MM)'}), 400
+
+    try:
+        if event_id and db.session.get(Event, event_id):
+            # Check permissions for existing event
+            event = db.session.get(Event, event_id)
+            if event.created_by != request.user.id:
+                return jsonify({'error': 'You do not have permission to update this event'}), 403
+
+        event = Event(
+            id=event_id,
+            name=name,
+            created_by=request.user.id,
+            event_date=event_date,
+            description=description,
+            status=status
+        )
+        db.session.merge(event)
+        db.session.commit()
+        
+        return jsonify({
+            'id': event.id,
+            'name': event.name,
+            'created_by': event.created_by,
+            'event_date': event.event_date.isoformat() if event.event_date else None,
+            'created_at': event.created_at.isoformat(),
+            'status': event.status,
+            'description': event.description
+        }), 200 if event_id else 201  # 200 for update, 201 for creation
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error {'updating' if event_id else 'creating'} event: {e}")
+        return jsonify({'error': f'Could not {"update" if event_id else "create"} event'}), 500
+
+@app.route('/api/events/my', methods=['GET'])
+@require_auth
+def get_my_events():
+    """Fetch all events created by the authenticated user."""
+    try:
+        # Build the query with optional filters
+        stmt = (
+            select(Event)
+            .filter_by(created_by=request.user.id)
+            .order_by(Event.created_at.desc())  # Most recent first
+        )
+        
+        # Add status filter if provided
+        status = request.args.get('status')
+        if status:
+            stmt = stmt.filter_by(status=status)
+            
+        events = db.session.scalars(stmt).all()
+        
+        return jsonify([{
+            'id': event.id,
+            'name': event.name,
+            'event_date': event.event_date.isoformat() if event.event_date else None,
+            'created_at': event.created_at.isoformat(),
+            'status': event.status,
+        } for event in events])
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching user events: {e}")
+        return jsonify({'error': 'Failed to retrieve events'}), 500
+
 # --- Main Execution ---
 if __name__ == "__main__":
     # Optional: Create tables if they don't exist (useful for development)
