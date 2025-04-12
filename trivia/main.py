@@ -47,7 +47,7 @@ class User(db.Model):
 
     # Relationships
     sessions: Mapped[List["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    events_created: Mapped[List["Event"]] = relationship(back_populates="creator", foreign_keys="Event.created_by")
+    events_created: Mapped[List["Event"]] = relationship(back_populates="creator", foreign_keys="Event.user_id")
     user_questions: Mapped[List["UserGeneratedQuestion"]] = relationship(back_populates="creator")
 
     def set_password(self, password):
@@ -97,14 +97,14 @@ class Event(db.Model):
     __tablename__ = 'events'
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(db.String(255), nullable=False)
-    created_by: Mapped[int] = mapped_column(db.ForeignKey('users.id'))
+    user_id: Mapped[int] = mapped_column(db.ForeignKey('users.id'))
     event_date: Mapped[Optional[datetime]] = mapped_column(db.DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(db.String(50), default='draft', server_default='draft')
     description: Mapped[Optional[str]] = mapped_column(db.Text, nullable=True)
 
     # Relationships
-    creator: Mapped["User"] = relationship(back_populates="events_created", foreign_keys=[created_by])
+    creator: Mapped["User"] = relationship(back_populates="events_created", foreign_keys=[user_id])
     rounds: Mapped[List["Round"]] = relationship(back_populates="event", cascade="all, delete-orphan", order_by="Round.round_number")
 
 class NormalizedQuestion(db.Model):
@@ -609,7 +609,7 @@ def add_user_generated_question():
         # Provide a more specific error if possible (e.g., FK violation)
         return jsonify({'error': f'Could not add question: {e}'}), 500
 
-@app.route('/api/events', methods=['POST'])  # POST is more appropriate since we're primarily creating/modifying a resource
+@app.route('/api/events', methods=['POST'])
 @require_auth
 def create_or_update_event():
     """Create a new event or update an existing one for the authenticated user."""
@@ -618,17 +618,13 @@ def create_or_update_event():
         return jsonify({'error': 'No input data provided'}), 400
 
     # Extract event data with defaults where appropriate
-    event_id = data.get('id')  # Optional - if provided, we'll update instead of create
+    event_id = data.get('id')
     name = data.get('name')
-    event_date = data.get('event_date')  # Optional
-    description = data.get('description')  # Optional
-    status = data.get('status', 'draft')  # Default to 'draft' if not provided
-
-    # Validate required fields
     if not name:
         return jsonify({'error': 'Event name is required'}), 400
 
-    # Convert event_date string to datetime if provided
+    # Convert event_date if provided
+    event_date = data.get('event_date')
     if event_date:
         try:
             event_date = datetime.fromisoformat(event_date)
@@ -638,32 +634,35 @@ def create_or_update_event():
             return jsonify({'error': 'Invalid event_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS+HH:MM)'}), 400
 
     try:
-        if event_id and db.session.get(Event, event_id):
-            # Check permissions for existing event
-            event = db.session.get(Event, event_id)
-            if event.created_by != request.user.id:
-                return jsonify({'error': 'You do not have permission to update this event'}), 403
+        # Get or create pattern
+        event = db.session.get(Event, event_id) if event_id else Event()
+        
+        # Check permissions if updating
+        if event_id and (not event or event.user_id != request.user.id):
+            return jsonify({'error': 'Event not found or permission denied'}), 403
 
-        event = Event(
-            id=event_id,
-            name=name,
-            created_by=request.user.id,
-            event_date=event_date,
-            description=description,
-            status=status
-        )
-        db.session.merge(event)
+        # Update attributes
+        event.name = name
+        event.user_id = request.user.id
+        event.event_date = event_date
+        event.description = data.get('description')
+        event.status = data.get('status', 'draft')
+
+        # Add only if new
+        if not event_id:
+            db.session.add(event)
+            
         db.session.commit()
         
         return jsonify({
             'id': event.id,
             'name': event.name,
-            'created_by': event.created_by,
             'event_date': event.event_date.isoformat() if event.event_date else None,
             'created_at': event.created_at.isoformat(),
             'status': event.status,
             'description': event.description
-        }), 200 if event_id else 201  # 200 for update, 201 for creation
+        }), 200 if event_id else 201
+
     except Exception as e:
         db.session.rollback()
         app.logger.error(f"Error {'updating' if event_id else 'creating'} event: {e}")
@@ -677,7 +676,7 @@ def get_my_events():
         # Build the query with optional filters
         stmt = (
             select(Event)
-            .filter_by(created_by=request.user.id)
+            .filter_by(user_id=request.user.id)
             .order_by(Event.created_at.desc())  # Most recent first
         )
         

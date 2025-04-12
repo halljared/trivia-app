@@ -48,7 +48,6 @@ CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
     name VARCHAR(255) NOT NULL,
-    created_by INTEGER REFERENCES users(id),
     event_date TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(50) DEFAULT 'draft', -- draft, active, completed, etc.
