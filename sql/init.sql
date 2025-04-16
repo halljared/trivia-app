@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS events (
     event_date TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(50) DEFAULT 'draft', -- draft, active, completed, etc.
-    description TEXT
+    description TEXT,
+    is_deleted BOOLEAN DEFAULT FALSE
 );
 
 -- Create rounds table

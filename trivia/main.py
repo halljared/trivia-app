@@ -102,6 +102,7 @@ class Event(db.Model):
     created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(db.String(50), default='draft', server_default='draft')
     description: Mapped[Optional[str]] = mapped_column(db.Text, nullable=True)
+    is_deleted: Mapped[bool] = mapped_column(db.Boolean, default=False, server_default='false')
 
     # Relationships
     creator: Mapped["User"] = relationship(back_populates="events_created", foreign_keys=[user_id])
@@ -617,66 +618,101 @@ def create_or_update_event():
     if not data:
         return jsonify({'error': 'No input data provided'}), 400
 
-    # Extract event data with defaults where appropriate
     event_id = data.get('id')
     name = data.get('name')
-    if not name:
-        return jsonify({'error': 'Event name is required'}), 400
 
-    # Convert event_date if provided
-    event_date = data.get('event_date')
-    if event_date:
-        try:
-            event_date = datetime.fromisoformat(event_date)
-            if event_date.tzinfo is None:
-                event_date = event_date.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return jsonify({'error': 'Invalid event_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS+HH:MM)'}), 400
+    # Name is always required for creation, and usually present for updates
+    if not event_id and not name:
+         return jsonify({'error': 'Event name is required for creation'}), 400
+    # If updating, name is optional, but if provided, it must be non-empty
+    if event_id and 'name' in data and not name:
+         return jsonify({'error': 'Event name cannot be empty if provided'}), 400
+
 
     try:
+        # Prepare dictionary ONLY with fields present in the request
+        event_data = {}
+        if 'name' in data:
+             event_data['name'] = name
+        if 'description' in data:
+            event_data['description'] = data.get('description')
+        if 'status' in data:
+            event_data['status'] = data.get('status')
+
+        # Handle event_date separately due to conversion
+        if 'event_date' in data:
+            event_date_str = data.get('event_date')
+            if event_date_str is None:
+                 # Explicitly setting date to null
+                 event_data['event_date'] = None
+            else:
+                try:
+                    parsed_date = datetime.fromisoformat(event_date_str)
+                    if parsed_date.tzinfo is None:
+                        # Assume UTC if no timezone is provided
+                        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                    event_data['event_date'] = parsed_date
+                except (ValueError, TypeError): # Catch TypeError for None
+                    return jsonify({'error': 'Invalid event_date format. Use ISO format (YYYY-MM-DDTHH:MM:SS[+-]HH:MM) or null'}), 400
+
         # Get or create pattern
-        event = db.session.get(Event, event_id) if event_id else Event()
-        
-        # Check permissions if updating
-        if event_id and (not event or event.user_id != request.user.id):
-            return jsonify({'error': 'Event not found or permission denied'}), 403
+        if event_id:
+            event = db.session.get(Event, event_id)
+            if not event:
+                 return jsonify({'error': 'Event not found'}), 404
+            # Check permissions only when updating an existing event
+            if event.user_id != request.user.id:
+                return jsonify({'error': 'Permission denied'}), 403
+            # Apply updates from the filtered dictionary
+            for key, value in event_data.items():
+                setattr(event, key, value)
+        else:
+            # Create new event
+            # Ensure required fields are present
+            if 'name' not in event_data:
+                 return jsonify({'error': 'Event name is required for creation'}), 400
 
-        # Update attributes
-        event.name = name
-        event.user_id = request.user.id
-        event.event_date = event_date
-        event.description = data.get('description')
-        event.status = data.get('status', 'draft')
-
-        # Add only if new
-        if not event_id:
-            db.session.add(event)
+            # Set creation defaults if not provided
+            if 'status' not in event_data:
+                 event_data['status'] = 'draft'
             
+            # Add user_id explicitly for creation
+            event_data['user_id'] = request.user.id
+
+            event = Event(**event_data) # Create using the prepared dict
+            db.session.add(event)
+
+
         db.session.commit()
-        
+
+        # Refresh the event object to get potentially auto-generated fields like created_at
+        # Only strictly necessary if you return fields not set manually, but good practice.
+        db.session.refresh(event)
+
         return jsonify({
             'id': event.id,
             'name': event.name,
             'event_date': event.event_date.isoformat() if event.event_date else None,
-            'created_at': event.created_at.isoformat(),
+            'created_at': event.created_at.isoformat(), # Now safely available
             'status': event.status,
             'description': event.description
         }), 200 if event_id else 201
 
     except Exception as e:
         db.session.rollback()
-        app.logger.error(f"Error {'updating' if event_id else 'creating'} event: {e}")
+        app.logger.error(f"Error {'updating' if event_id else 'creating'} event (ID: {event_id}): {e}")
         return jsonify({'error': f'Could not {"update" if event_id else "create"} event'}), 500
 
 @app.route('/api/events/my', methods=['GET'])
 @require_auth
 def get_my_events():
-    """Fetch all events created by the authenticated user."""
+    """Fetch all non-deleted events created by the authenticated user."""
     try:
         # Build the query with optional filters
         stmt = (
             select(Event)
             .filter_by(user_id=request.user.id)
+            .filter_by(is_deleted=False)  # Only return non-deleted events
             .order_by(Event.created_at.desc())  # Most recent first
         )
         
@@ -698,6 +734,29 @@ def get_my_events():
     except Exception as e:
         app.logger.error(f"Error fetching user events: {e}")
         return jsonify({'error': 'Failed to retrieve events'}), 500
+
+@app.route('/api/events/<int:event_id>', methods=['DELETE'])
+@require_auth
+def delete_event(event_id):
+    """Soft delete an event by setting is_deleted to true."""
+    try:
+        event = db.session.get(Event, event_id)
+        
+        if not event:
+            return jsonify({'error': 'Event not found'}), 404
+            
+        if event.user_id != request.user.id:
+            return jsonify({'error': 'Permission denied'}), 403
+            
+        event.is_deleted = True
+        db.session.commit()
+        
+        return jsonify({'message': 'Event deleted successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error deleting event {event_id}: {e}")
+        return jsonify({'error': 'Failed to delete event'}), 500
 
 # --- Main Execution ---
 if __name__ == "__main__":
