@@ -248,22 +248,20 @@ def get_question():
         stmt = stmt.filter(TriviaQuestion.category_id == category_id)
 
     # Order randomly and fetch one
-    # NOTE: func.random() is efficient on PostgreSQL but less portable.
-    #       A more portable (but potentially slower on large tables) way is:
-    #       count = db.session.scalar(select(func.count()).select_from(stmt.subquery()))
-    #       if count: q = db.session.scalars(stmt.offset(random.randrange(count)).limit(1)).first() else: q=None
     stmt = stmt.order_by(func.random()).limit(1)
     q = db.session.scalar(stmt)
 
     if not q:
         return jsonify({"error": "No questions found with these criteria"}), 404
 
+    # Construct response with camelCase keys
     return jsonify({
         'id': q.id,
         'question': q.question,
         'answer': q.answer,
-        'category': q.category.name if q.category else None, # Access relationship
+        'category': q.category.name if q.category else None,
         'difficulty': q.difficulty
+        # No snake_case keys here, so no change needed from previous state, but good practice to verify.
     })
 
 @app.route('/api/check-answer', methods=['POST'])
@@ -302,6 +300,7 @@ def get_categories():
         select(Category).order_by(Category.name)
     ).all()
 
+    # Construct response with camelCase keys (no change needed as keys were simple)
     return jsonify([{"id": c.id, "name": c.name} for c in categories])
 
 @app.route('/api/difficulties', methods=['GET'])
@@ -323,10 +322,12 @@ def get_active_categories():
     )
     results = db.session.execute(stmt).all() # Returns Row objects
 
-    return jsonify([
-        {"id": row.id, "name": row.name, "question_count": row.question_count}
+    # Manually create dicts with camelCase keys
+    categories_data = [
+        {"id": row.id, "name": row.name, "questionCount": row.question_count} # Renamed question_count
         for row in results
-    ])
+    ]
+    return jsonify(categories_data) # Return the transformed data
 
 @app.route('/api/category/<int:category_id>/questions', methods=['GET'])
 def get_category_questions(category_id):
@@ -344,14 +345,14 @@ def get_category_questions(category_id):
         .filter_by(category_id=category_id)
         .order_by(func.random())
         .limit(count)
-        # No need to join Category again if only accessing via object later
     )
     questions = db.session.scalars(stmt).all()
 
     if not questions:
         return jsonify({"error": "No questions found in this category"}), 404
 
-    return jsonify([
+    # Construct response with camelCase keys (no change needed as keys were simple)
+    questions_data = [
         {
             'id': q.id,
             'question': q.question,
@@ -359,7 +360,8 @@ def get_category_questions(category_id):
             'category': category.name, # Use the fetched category name
             'difficulty': q.difficulty
         } for q in questions
-    ])
+    ]
+    return jsonify(questions_data)
 
 # --- Auth Routes ---
 
@@ -388,13 +390,16 @@ def register():
     try:
         db.session.add(new_user)
         db.session.commit()
+        # Construct user data with camelCase keys
+        user_data = {
+            'id': new_user.id,
+            'username': new_user.username,
+            'email': new_user.email
+            # 'createdAt': new_user.created_at.isoformat() if new_user.created_at else None # Example if needed later
+        }
         return jsonify({
             'message': 'User registered successfully',
-            'user': {
-                'id': new_user.id,
-                'username': new_user.username,
-                'email': new_user.email
-            }
+            'user': user_data
         }), 201
     except Exception as e:
         db.session.rollback()
@@ -430,13 +435,16 @@ def login():
     try:
         db.session.add(new_session)
         db.session.commit()
+        # Construct user data with camelCase keys
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email
+            # 'lastLogin': user.last_login.isoformat() if user.last_login else None # Example if needed later
+        }
         return jsonify({
-            'session_token': session_token,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email
-            }
+            'session_token': session_token, # Key is already fine
+            'user': user_data
         })
     except Exception as e:
         db.session.rollback()
@@ -478,13 +486,13 @@ def get_current_user():
     if not user:
         return jsonify({'error': 'Invalid or expired session'}), 401
 
+    # Construct response with camelCase keys
     return jsonify({
         'id': user.id,
         'username': user.username,
         'email': user.email,
-        # Ensure timezone info is handled if present, else use isoformat
-        'created_at': user.created_at.isoformat() if user.created_at else None,
-        'last_login': user.last_login.isoformat() if user.last_login else None
+        'createdAt': user.created_at.isoformat() if user.created_at else None, # Renamed created_at
+        'lastLogin': user.last_login.isoformat() if user.last_login else None # Renamed last_login
     })
 
 # --- Event/Round/Question Routes ---
@@ -493,72 +501,156 @@ def get_current_user():
 @require_auth
 def get_event(event_id):
     """Fetch an event and its associated rounds by event ID."""
-    # Eager load rounds to avoid N+1 queries when accessing event.rounds
-    event = db.session.scalar(
+    # Eager load rounds
+    stmt = (
         select(Event)
-        .options(joinedload(Event.rounds)) # Eager load rounds
+        .options(selectinload(Event.rounds)) # Use selectinload for potentially better performance on lists
         .filter_by(id=event_id)
     )
+    event = db.session.scalar(stmt)
+
 
     if not event:
         return jsonify({'error': 'Event not found'}), 404
+    
+    # Check permission AFTER fetching, to give correct 404 vs 403
+    if event.user_id != request.user.id:
+        return jsonify({'error': 'Permission denied'}), 403
 
-    # Structure the response using the ORM objects
-    return jsonify({
+
+    # Structure the response with camelCase keys
+    rounds_data = [
+        {
+            'id': r.id,
+            'roundNumber': r.round_number, # Renamed round_number
+            'name': r.name,
+            'createdAt': r.created_at.isoformat() if r.created_at else None, # Renamed created_at
+            'categoryId': r.category_id, # Added categoryId
+            # 'categoryName': r.category.name if r.category else None # Example if needed later
+        } for r in event.rounds
+    ]
+    
+    event_data = {
         'id': event.id,
         'name': event.name,
-        'event_date': event.event_date.isoformat() if event.event_date else None,
+        'eventDate': event.event_date.isoformat() if event.event_date else None, # Renamed event_date
         'status': event.status,
         'description': event.description,
-        'rounds': [
-            {
-                'id': r.id,
-                'round_number': r.round_number,
-                'name': r.name,
-                'created_at': r.created_at.isoformat() if r.created_at else None
-                # Add category info if needed: 'category_id': r.category_id
-            } for r in event.rounds # Access the relationship directly
-        ]
-    })
+        'rounds': rounds_data,
+        'createdAt': event.created_at.isoformat() if event.created_at else None, # Renamed created_at
+        'userId': event.user_id, # Added userId
+        # 'updatedAt': event.updated_at.isoformat() if event.updated_at else None # Assuming you add an updated_at field later
+    }
+    return jsonify(event_data)
 
 @app.route('/api/rounds/<int:round_id>/questions', methods=['GET'])
 @require_auth
 def get_round_questions(round_id):
-    """Fetch all questions for a specific round using a database function."""
+    """Fetch all questions for a specific round using the normalized view."""
 
     # Optional but recommended: Check if the round itself exists first
-    # This gives a more specific 404 if the round ID is invalid.
     round_exists = db.session.get(Round, round_id)
     if not round_exists:
          return jsonify({'error': f'Round with id {round_id} not found'}), 404
 
+    # Verify the user has access to the event this round belongs to
+    event_owner_id = db.session.scalar(select(Event.user_id).join(Round).filter(Round.id == round_id))
+    if event_owner_id is None: # Should not happen if round exists, but safety check
+        return jsonify({'error': 'Round data inconsistent'}), 500
+    if event_owner_id != request.user.id:
+        return jsonify({'error': 'Permission denied to access this round\'s questions'}), 403
+
     try:
+        # Select the Round and eager load the normalized questions from the view
         stmt = (
             select(Round)
             .where(Round.id == round_id)
             .options(
-                selectinload(Round.questions) # Just load the relationship to the view!
+                selectinload(Round.normalized_questions) # Eager load the view relationship
             )
         )
         round_obj = db.session.scalars(stmt).first()
+
+        # Double check if round_obj was actually found
+        if not round_obj:
+            # This case should ideally be caught by the initial get, but good safety check
+            return jsonify({'error': f'Round with id {round_id} not found after loading relationships'}), 404
+
+        # Construct response with camelCase keys from the normalized view data
         questions_list = [{
-            'round_question_id': q.round_question_id,
-            'round_id': q.round_id,
-            'question_number': q.question_number,
-            'question_id': q.question_id,
-            'question_type': q.question_type,
+            'roundQuestionId': q.round_question_id, # Renamed round_question_id
+            'roundId': q.round_id,                 # Renamed round_id
+            'questionNumber': q.question_number,   # Renamed question_number
+            'questionId': q.question_id,           # Renamed question_id
+            'questionType': q.question_type,       # Renamed question_type
             'question': q.question,
             'answer': q.answer,
             'difficulty': q.difficulty,
-            'category_id': q.category_id,
-            'category_name': q.category_name
-        } for q in round_obj.normalized_questions]
+            'categoryId': q.category_id,           # Renamed category_id
+            'categoryName': q.category_name        # Renamed category_name
+        } for q in round_obj.normalized_questions] # Iterate over the loaded view relationship
+
         return jsonify(questions_list)
     except Exception as e:
         # Log the error for debugging
         app.logger.error(f"Database error fetching questions for round {round_id}: {e}")
         return jsonify({'error': 'Failed to retrieve questions due to a database error'}), 500
 
+@app.route('/api/rounds', methods=['POST'])
+@require_auth
+def create_round():
+    """Create a new round for a specific event."""
+    data = request.get_json()
+    if not data or 'event_id' not in data:
+        return jsonify({'error': 'Missing event_id'}), 400
+
+    event_id = data['event_id']
+
+    # Verify the event exists and belongs to the current user
+    event = db.session.scalar(
+        select(Event).filter_by(id=event_id, user_id=request.user.id)
+    )
+    if not event:
+        # Check if the event exists at all to give a more specific error
+        event_exists = db.session.get(Event, event_id)
+        if not event_exists:
+             return jsonify({'error': f'Event with id {event_id} not found'}), 404
+        else:
+             return jsonify({'error': 'Permission denied to add rounds to this event'}), 403
+
+    try:
+        # Find the highest current round number for this event
+        max_round_number = db.session.scalar(
+            select(func.max(Round.round_number))
+            .filter_by(event_id=event_id)
+        )
+        new_round_number = (max_round_number or 0) + 1
+
+        # Create the new round
+        new_round = Round(
+            event_id=event_id,
+            round_number=new_round_number,
+            name=f"Round {new_round_number}" # Default name
+            # category_id will be null by default
+        )
+
+        db.session.add(new_round)
+        db.session.commit()
+
+        # Construct response with camelCase keys
+        return jsonify({
+            'id': new_round.id,
+            'name': new_round.name,
+            'roundNumber': new_round.round_number, # Renamed round_number
+            'eventId': new_round.event_id,       # Renamed event_id
+            'categoryId': new_round.category_id,  # Add categoryId (will be null initially)
+            'createdAt': new_round.created_at.isoformat() if new_round.created_at else None # Add createdAt
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error creating round for event {event_id}: {e}")
+        return jsonify({'error': 'Could not create round'}), 500
 
 @app.route('/api/questions/user-generated', methods=['POST'])
 @require_auth
@@ -684,18 +776,18 @@ def create_or_update_event():
 
 
         db.session.commit()
+        db.session.refresh(event) # Ensure computed fields like created_at are loaded
 
-        # Refresh the event object to get potentially auto-generated fields like created_at
-        # Only strictly necessary if you return fields not set manually, but good practice.
-        db.session.refresh(event)
-
+        # Construct response with camelCase keys
         return jsonify({
             'id': event.id,
             'name': event.name,
-            'event_date': event.event_date.isoformat() if event.event_date else None,
-            'created_at': event.created_at.isoformat(), # Now safely available
+            'eventDate': event.event_date.isoformat() if event.event_date else None, # Renamed event_date
+            'createdAt': event.created_at.isoformat(), # Renamed created_at
             'status': event.status,
-            'description': event.description
+            'description': event.description,
+            'userId': event.user_id # Add userId
+             # 'updatedAt': event.updated_at.isoformat() if event.updated_at else None # If you add an updated_at field later
         }), 200 if event_id else 201
 
     except Exception as e:
@@ -723,13 +815,17 @@ def get_my_events():
             
         events = db.session.scalars(stmt).all()
         
-        return jsonify([{
+        # Manually create dicts with camelCase keys
+        events_data = [{
             'id': event.id,
             'name': event.name,
-            'event_date': event.event_date.isoformat() if event.event_date else None,
-            'created_at': event.created_at.isoformat(),
+            'eventDate': event.event_date.isoformat() if event.event_date else None, # Renamed event_date
+            'createdAt': event.created_at.isoformat(), # Renamed created_at
             'status': event.status,
-        } for event in events])
+            # We might need roundsCount here if ListEvent expects it based on the TS type
+            # 'roundsCount': len(event.rounds) # Example if needed - requires loading rounds
+        } for event in events]
+        return jsonify(events_data) # Return the transformed data
         
     except Exception as e:
         app.logger.error(f"Error fetching user events: {e}")
