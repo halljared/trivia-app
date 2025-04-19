@@ -139,6 +139,7 @@ class Round(db.Model):
     round_number: Mapped[int] = mapped_column(nullable=False)
     name: Mapped[Optional[str]] = mapped_column(db.String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
+    is_deleted: Mapped[bool] = mapped_column(db.Boolean, default=False, server_default='false')
 
     __table_args__ = (UniqueConstraint('event_id', 'round_number', name='uq_rounds_event_round'),)
 
@@ -501,10 +502,12 @@ def get_current_user():
 @require_auth
 def get_event(event_id):
     """Fetch an event and its associated rounds by event ID."""
-    # Eager load rounds
     stmt = (
         select(Event)
-        .options(selectinload(Event.rounds)) # Use selectinload for potentially better performance on lists
+        .options(
+            selectinload(Event.rounds.and_(Round.is_deleted == False))  # Only load non-deleted rounds
+            .selectinload(Round.normalized_questions)
+        )
         .filter_by(id=event_id)
     )
     event = db.session.scalar(stmt)
@@ -522,11 +525,24 @@ def get_event(event_id):
     rounds_data = [
         {
             'id': r.id,
-            'roundNumber': r.round_number, # Renamed round_number
+            'roundNumber': r.round_number,
             'name': r.name,
-            'createdAt': r.created_at.isoformat() if r.created_at else None, # Renamed created_at
-            'categoryId': r.category_id, # Added categoryId
-            # 'categoryName': r.category.name if r.category else None # Example if needed later
+            'createdAt': r.created_at.isoformat() if r.created_at else None,
+            'categoryId': r.category_id,
+            'questions': [
+                {
+                    'roundQuestionId': q.round_question_id,
+                    'roundId': q.round_id,
+                    'questionNumber': q.question_number,
+                    'questionId': q.question_id,
+                    'questionType': q.question_type,
+                    'question': q.question,
+                    'answer': q.answer,
+                    'difficulty': q.difficulty,
+                    'categoryId': q.category_id,
+                    'categoryName': q.category_name
+                } for q in r.normalized_questions
+            ]
         } for r in event.rounds
     ]
     
@@ -853,6 +869,32 @@ def delete_event(event_id):
         db.session.rollback()
         app.logger.error(f"Error deleting event {event_id}: {e}")
         return jsonify({'error': 'Failed to delete event'}), 500
+
+@app.route('/api/rounds/<int:round_id>', methods=['DELETE'])
+@require_auth
+def delete_round(round_id):
+    """Soft delete a round by setting is_deleted to true."""
+    try:
+        # Get the round and verify it exists
+        round_obj = db.session.get(Round, round_id)
+        
+        if not round_obj:
+            return jsonify({'error': 'Round not found'}), 404
+            
+        # Verify the user has permission (owns the event)
+        if round_obj.event.user_id != request.user.id:
+            return jsonify({'error': 'Permission denied'}), 403
+            
+        # Soft delete the round
+        round_obj.is_deleted = True
+        db.session.commit()
+        
+        return jsonify({'message': 'Round deleted successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error deleting round {round_id}: {e}")
+        return jsonify({'error': 'Failed to delete round'}), 500
 
 # --- Main Execution ---
 if __name__ == "__main__":
