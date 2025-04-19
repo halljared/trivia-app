@@ -1,0 +1,7 @@
+---
+description: Defines where app server and also api routes are typed on the front end. Defines where front-end trivia types are.
+globs: 
+alwaysApply: false
+---
+- My app server is defined at [main.py](mdc:trivia/trivia/trivia/main.py) and the routes on the front-end are in [api.ts](mdc:trivia/trivia-frontend/src/config/api.ts).
+- For type definitions look in [trivia.ts](mdc:trivia/trivia-frontend/src/types/trivia.ts). 
