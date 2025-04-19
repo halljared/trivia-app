@@ -1,203 +1,25 @@
-import os
-import random
-import secrets
-import bcrypt
-from datetime import datetime, timedelta, timezone # Use timezone-aware datetimes
+from datetime import datetime, timedelta, timezone
 from fuzzywuzzy import fuzz
-from dotenv import load_dotenv
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func, UniqueConstraint, CheckConstraint, select # Import necessary SQLAlchemy functions/classes
-from sqlalchemy.orm import joinedload, Mapped, mapped_column, relationship, selectinload # Use newer SQLAlchemy 2.0 style
-from typing import List, Optional # For type hinting
+from flask import jsonify, request
+from sqlalchemy import func, UniqueConstraint, CheckConstraint, select
+from sqlalchemy.orm import joinedload, Mapped, mapped_column, relationship, selectinload
+from typing import List, Optional
 from functools import wraps
+import bcrypt
+import secrets
 
-# --- Load Environment Variables ---
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
-
-# --- App Configuration ---
-app = Flask(__name__)
-CORS(app) # Enable CORS for all routes
-
-# Database Configuration using environment variables
-DB_NAME = os.getenv('DB_NAME')
-DB_USER = os.getenv('DB_USER')
-DB_PASSWORD = os.getenv('DB_PASSWORD')
-DB_HOST = os.getenv('DB_HOST')
-DB_PORT = os.getenv('DB_PORT', '5432') # Default PostgreSQL port
-
-# Configure SQLAlchemy - Use 'postgresql+psycopg2' driver
-app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Disable modification tracking overhead
-
-# Initialize SQLAlchemy extension
-db = SQLAlchemy(app)
-
-# --- SQLAlchemy Models (Define based on your SQL schema) ---
-
-class User(db.Model):
-    __tablename__ = 'users'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(db.String(50), unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(db.String(255), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(db.String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-    last_login: Mapped[Optional[datetime]] = mapped_column(db.DateTime(timezone=True), nullable=True)
-
-    # Relationships
-    sessions: Mapped[List["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    events_created: Mapped[List["Event"]] = relationship(back_populates="creator", foreign_keys="Event.user_id")
-    user_questions: Mapped[List["UserGeneratedQuestion"]] = relationship(back_populates="creator")
-
-    def set_password(self, password):
-        self.password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-    def check_password(self, password):
-        return bcrypt.checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
-
-class UserSession(db.Model):
-    __tablename__ = 'user_sessions'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(db.ForeignKey('users.id', ondelete='CASCADE'), index=True)
-    session_token: Mapped[str] = mapped_column(db.String(255), unique=True, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-    expires_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), nullable=False)
-
-    # Relationships
-    user: Mapped["User"] = relationship(back_populates="sessions")
-
-class Category(db.Model):
-    __tablename__ = 'categories'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(db.String(256), unique=True, nullable=False)
-
-    # Relationships
-    trivia_questions: Mapped[List["TriviaQuestion"]] = relationship(back_populates="category")
-    rounds: Mapped[List["Round"]] = relationship(back_populates="category")
-    user_questions: Mapped[List["UserGeneratedQuestion"]] = relationship(back_populates="category")
-
-class TriviaQuestion(db.Model):
-    __tablename__ = 'trivia_questions'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    question: Mapped[str] = mapped_column(db.Text, nullable=False)
-    answer: Mapped[str] = mapped_column(db.Text, nullable=False)
-    category_id: Mapped[int] = mapped_column(db.ForeignKey('categories.id'), nullable=False, index=True)
-    difficulty: Mapped[str] = mapped_column(db.String(10), nullable=False, index=True) # 'easy', 'medium', or 'hard'
-    air_date: Mapped[Optional[datetime]] = mapped_column(db.Date, nullable=True)
-    original_value: Mapped[Optional[int]] = mapped_column(db.SmallInteger, nullable=True)
-    original_round: Mapped[Optional[int]] = mapped_column(db.SmallInteger, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(db.Text, nullable=True)
-
-    # Relationships
-    category: Mapped["Category"] = relationship(back_populates="trivia_questions")
-    round_associations: Mapped[List["RoundQuestion"]] = relationship(back_populates="preset_question")
-
-class Event(db.Model):
-    __tablename__ = 'events'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(db.String(255), nullable=False)
-    user_id: Mapped[int] = mapped_column(db.ForeignKey('users.id'))
-    event_date: Mapped[Optional[datetime]] = mapped_column(db.DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-    status: Mapped[str] = mapped_column(db.String(50), default='draft', server_default='draft')
-    description: Mapped[Optional[str]] = mapped_column(db.Text, nullable=True)
-    is_deleted: Mapped[bool] = mapped_column(db.Boolean, default=False, server_default='false')
-
-    # Relationships
-    creator: Mapped["User"] = relationship(back_populates="events_created", foreign_keys=[user_id])
-    rounds: Mapped[List["Round"]] = relationship(back_populates="event", cascade="all, delete-orphan", order_by="Round.round_number")
-
-class NormalizedQuestion(db.Model):
-    __tablename__ = 'normalized_questions_view'
-    
-    round_question_id: Mapped[int] = mapped_column(primary_key=True)
-    round_id: Mapped[int] = mapped_column(db.ForeignKey('rounds.id'))
-    question_number: Mapped[int] = mapped_column()
-    question_id: Mapped[int] = mapped_column()
-    question_type: Mapped[str] = mapped_column(db.String(10))
-    question: Mapped[str] = mapped_column(db.Text)
-    answer: Mapped[str] = mapped_column(db.Text)
-    difficulty: Mapped[str] = mapped_column(db.String(10))
-    category_id: Mapped[Optional[int]] = mapped_column()
-    category_name: Mapped[str] = mapped_column(db.String(256))
-
-    __table_args__ = (
-        {'info': {'is_view': True}}  # Mark this as a view
-    )
-
-    # Make it effectively immutable
-    __mapper_args__ = {
-        'confirm_deleted_rows': False
-    }
-
-class Round(db.Model):
-    __tablename__ = 'rounds'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    event_id: Mapped[int] = mapped_column(db.ForeignKey('events.id', ondelete='CASCADE'), index=True)
-    category_id: Mapped[Optional[int]] = mapped_column(db.ForeignKey('categories.id'), nullable=True)
-    round_number: Mapped[int] = mapped_column(nullable=False)
-    name: Mapped[Optional[str]] = mapped_column(db.String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-    is_deleted: Mapped[bool] = mapped_column(db.Boolean, default=False, server_default='false')
-
-    __table_args__ = (UniqueConstraint('event_id', 'round_number', name='uq_rounds_event_round'),)
-
-    # Relationships
-    event: Mapped["Event"] = relationship(back_populates="rounds")
-    category: Mapped[Optional["Category"]] = relationship(back_populates="rounds")
-    questions: Mapped[List["RoundQuestion"]] = relationship(back_populates="round", cascade="all, delete-orphan", order_by="RoundQuestion.question_number")
-    normalized_questions: Mapped[List["NormalizedQuestion"]] = relationship(
-        primaryjoin="Round.id == NormalizedQuestion.round_id",
-        order_by="NormalizedQuestion.question_number",
-        viewonly=True # Crucial: Indicates this relationship is read-only via the view
-    )
-
-
-class UserGeneratedQuestion(db.Model):
-    __tablename__ = 'user_generated_questions'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    question: Mapped[str] = mapped_column(db.Text, nullable=False)
-    answer: Mapped[str] = mapped_column(db.Text, nullable=False)
-    category_id: Mapped[Optional[int]] = mapped_column(db.ForeignKey('categories.id'), index=True)
-    difficulty: Mapped[str] = mapped_column(db.String(10), nullable=False) # 'easy', 'medium', or 'hard'
-    created_by: Mapped[Optional[int]] = mapped_column(db.ForeignKey('users.id'))
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-    status: Mapped[str] = mapped_column(db.String(50), default='active', server_default='active') # active, flagged, deleted, etc.
-    notes: Mapped[Optional[str]] = mapped_column(db.Text, nullable=True)
-
-    # Relationships
-    category: Mapped[Optional["Category"]] = relationship(back_populates="user_questions")
-    creator: Mapped[Optional["User"]] = relationship(back_populates="user_questions")
-    round_associations: Mapped[List["RoundQuestion"]] = relationship(back_populates="user_question")
-
-
-class RoundQuestion(db.Model):
-    __tablename__ = 'round_questions'
-    id: Mapped[int] = mapped_column(primary_key=True)
-    round_id: Mapped[int] = mapped_column(db.ForeignKey('rounds.id', ondelete='CASCADE'))
-    question_number: Mapped[int] = mapped_column(nullable=False)
-    preset_question_id: Mapped[Optional[int]] = mapped_column(db.ForeignKey('trivia_questions.id'), index=True, nullable=True)
-    user_question_id: Mapped[Optional[int]] = mapped_column(db.ForeignKey('user_generated_questions.id'), index=True, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(db.DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint('round_id', 'question_number', name='uq_round_questions_round_number'),
-        CheckConstraint(
-            '(preset_question_id IS NULL AND user_question_id IS NOT NULL) OR (preset_question_id IS NOT NULL AND user_question_id IS NULL)',
-            name='ck_round_questions_question_type'
-        )
-    )
-
-    # Relationships
-    round: Mapped["Round"] = relationship(back_populates="questions")
-    preset_question: Mapped[Optional["TriviaQuestion"]] = relationship(back_populates="round_associations")
-    user_question: Mapped[Optional["UserGeneratedQuestion"]] = relationship(back_populates="round_associations")
-
-    # Property to get the actual question object regardless of type
-    @property
-    def question_object(self):
-       return self.preset_question or self.user_question
+from . import app, db
+from .models import (
+    User,
+    UserSession,
+    Category,
+    TriviaQuestion,
+    Event,
+    NormalizedQuestion,
+    Round,
+    UserGeneratedQuestion,
+    RoundQuestion
+)
 
 # --- Helper Function for Auth ---
 
