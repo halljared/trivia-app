@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import List, Optional
-from .. import db
+from ..database import db
 
 class TriviaQuestion(db.Model):
     __tablename__ = 'trivia_questions'

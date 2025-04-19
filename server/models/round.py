@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import UniqueConstraint, CheckConstraint
 from typing import List, Optional
-from .. import db
+from ..database import db
 
 class Round(db.Model):
     __tablename__ = 'rounds'

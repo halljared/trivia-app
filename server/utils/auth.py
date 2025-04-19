@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 from typing import Optional
 
 from ..models.user import User, UserSession
-from .. import db
+from ..database import db
 
 def get_user_from_token(session_token: str) -> Optional[User]:
     """Fetches a user based on a valid session token."""
