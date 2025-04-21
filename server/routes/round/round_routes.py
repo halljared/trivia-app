@@ -8,6 +8,66 @@ from ... import app
 
 round_bp = Blueprint('round', __name__)
 
+@round_bp.route('/api/rounds/<int:round_id>', methods=['GET'])
+@require_auth
+def get_round(round_id):
+    """Fetch a specific round and all its questions."""
+    # Check if the round exists
+    round_exists = db.session.get(Round, round_id)
+    if not round_exists:
+        return jsonify({'error': f'Round with id {round_id} not found'}), 404
+
+    # Verify user has access to the event
+    event_owner_id = db.session.scalar(select(Event.user_id).join(Round).filter(Round.id == round_id))
+    if event_owner_id is None:
+        return jsonify({'error': 'Round data inconsistent'}), 500
+    if event_owner_id != request.user.id:
+        return jsonify({'error': 'Permission denied to access this round'}), 403
+
+    try:
+        # Select the Round and eager load the normalized questions
+        stmt = (
+            select(Round)
+            .where(Round.id == round_id)
+            .options(
+                selectinload(Round.normalized_questions)
+            )
+        )
+        round_obj = db.session.scalars(stmt).first()
+
+        if not round_obj:
+            return jsonify({'error': f'Round with id {round_id} not found'}), 404
+
+        # Construct questions list
+        questions_list = [{
+            'roundQuestionId': q.round_question_id,
+            'roundId': q.round_id,
+            'questionNumber': q.question_number,
+            'questionId': q.question_id,
+            'questionType': q.question_type,
+            'question': q.question,
+            'answer': q.answer,
+            'difficulty': q.difficulty,
+            'categoryId': q.category_id,
+            'categoryName': q.category_name
+        } for q in round_obj.normalized_questions]
+
+        # Construct round response
+        round_response = {
+            'id': round_obj.id,
+            'name': round_obj.name,
+            'roundNumber': round_obj.round_number,
+            'eventId': round_obj.event_id,
+            'categoryId': round_obj.category_id,
+            'createdAt': round_obj.created_at.isoformat() if round_obj.created_at else None,
+            'questions': questions_list
+        }
+
+        return jsonify(round_response)
+    except Exception as e:
+        app.logger.error(f"Error fetching round {round_id}: {e}")
+        return jsonify({'error': 'Failed to retrieve round data'}), 500
+
 @round_bp.route('/api/rounds/<int:round_id>/questions', methods=['GET'])
 @require_auth
 def get_round_questions(round_id):
@@ -106,9 +166,10 @@ def create_round():
         return jsonify({
             'id': new_round.id,
             'name': new_round.name,
-            'roundNumber': new_round.round_number, # Renamed round_number
-            'eventId': new_round.event_id,       # Renamed event_id
-            'categoryId': new_round.category_id,  # Add categoryId (will be null initially)
+            'roundNumber': new_round.round_number,
+            'eventId': new_round.event_id,
+            'categoryId': new_round.category_id,
+            'questions': [], # makes UI code cleaner
             'createdAt': new_round.created_at.isoformat() if new_round.created_at else None # Add createdAt
         }), 201
 

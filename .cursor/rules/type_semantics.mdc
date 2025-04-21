@@ -1,0 +1,9 @@
+---
+description: When deciding which type to use for a Event, Round, or Question. Useful when fetching from server and when coding components that manage these types.
+globs: 
+alwaysApply: false
+---
+- Types are available in [trivia.ts](mdc:trivia-frontend/src/types/trivia.ts)
+- `New` prefixed types are for referencing UI layer types that don't have server generated fields like createdOn or id.
+- `API` suffix types are for the point when an object is fetched from the API.
+- Un-prefix/suffix types are for items that have been parsed into distint objects after loading from the API. These are the backbone of the interface components generally speaking.

@@ -130,7 +130,6 @@ def create_or_update_event():
             'status': event.status,
             'description': event.description,
             'userId': event.user_id # Add userId
-             # 'updatedAt': event.updated_at.isoformat() if event.updated_at else None # If you add an updated_at field later
         }), 200 if event_id else 201
 
     except Exception as e:
@@ -195,7 +194,6 @@ def get_event(event_id):
         'rounds': rounds_data,
         'createdAt': event.created_at.isoformat() if event.created_at else None, # Renamed created_at
         'userId': event.user_id, # Added userId
-        # 'updatedAt': event.updated_at.isoformat() if event.updated_at else None # Assuming you add an updated_at field later
     }
     return jsonify(event_data)
 
