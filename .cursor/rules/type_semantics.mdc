@@ -1,5 +1,5 @@
 ---
-description: When deciding which type to use for a Event, Round, or Question. Useful when fetching from server and when coding components that manage these types.
+description: Type location for Event, Round, or Question types. Useful when fetching from server and when coding components that manage these types.
 globs: 
 alwaysApply: false
 ---

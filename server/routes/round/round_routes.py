@@ -103,17 +103,17 @@ def get_round_questions(round_id):
 
         # Construct response with camelCase keys from the normalized view data
         questions_list = [{
-            'roundQuestionId': q.round_question_id, # Renamed round_question_id
-            'roundId': q.round_id,                 # Renamed round_id
-            'questionNumber': q.question_number,   # Renamed question_number
-            'questionId': q.question_id,           # Renamed question_id
-            'questionType': q.question_type,       # Renamed question_type
+            'roundQuestionId': q.round_question_id, 
+            'roundId': q.round_id,                
+            'questionNumber': q.question_number,  
+            'questionId': q.question_id,           
+            'questionType': q.question_type,       
             'question': q.question,
             'answer': q.answer,
             'difficulty': q.difficulty,
-            'categoryId': q.category_id,           # Renamed category_id
-            'categoryName': q.category_name        # Renamed category_name
-        } for q in round_obj.normalized_questions] # Iterate over the loaded view relationship
+            'categoryId': q.category_id,           
+            'categoryName': q.category_name        
+        } for q in round_obj.normalized_questions] 
 
         return jsonify(questions_list)
     except Exception as e:
