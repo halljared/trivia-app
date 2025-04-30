@@ -1,7 +1,6 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload
-from fuzzywuzzy import fuzz
 from ...utils.auth import require_auth
 from ...models import TriviaQuestion, Category, User, UserGeneratedQuestion
 from ...database import db  
@@ -41,34 +40,6 @@ def get_question():
         # No snake_case keys here, so no change needed from previous state, but good practice to verify.
     })
 
-@question_bp.route('/api/check-answer', methods=['POST'])
-def check_answer():
-    """Check if the provided answer matches the correct answer."""
-    data = request.get_json()
-    if not data or 'answer' not in data or 'question_id' not in data:
-        return jsonify({'error': 'Missing answer or question_id'}), 400
-
-    question_id = data['question_id']
-    user_answer = data['answer']
-
-    # Fetch the question (only checks preset questions currently)
-    q = db.session.get(TriviaQuestion, question_id) # Efficient lookup by primary key
-
-    if not q:
-        # TODO: Potentially check UserGeneratedQuestion as well if needed
-        return jsonify({'error': 'Question not found'}), 404
-
-    correct_answer = q.answer
-
-    # Fuzzy matching
-    score = fuzz.ratio(user_answer.lower(), correct_answer.lower())
-    is_correct = score >= 80 # Threshold for correctness
-
-    return jsonify({
-        'correct': is_correct,
-        'score': score,
-        'correct_answer': correct_answer
-    })
 
 @question_bp.route('/api/questions/user-generated', methods=['POST'])
 @require_auth

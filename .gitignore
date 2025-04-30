@@ -15,3 +15,5 @@ jeopardy/stragglers.csv
 jeopardy/fixed_categories.jsonl
 jeopardy/extras.json
 jeopardy/extracted.json
+.cursor
+.env.local

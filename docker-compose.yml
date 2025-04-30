@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15
+    restart: always
+    env_file:
+      - ./server/.env.docker
+    volumes:
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./server
+    depends_on:
+      - db
+    env_file:
+      - ./server/.env.docker
+    environment:
+      - FLASK_APP=__init__:app
+    ports:
+      - "8000:8000"
+    restart: always 

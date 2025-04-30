@@ -7,14 +7,15 @@ db = SQLAlchemy()
 
 def init_db(app):
     # --- Load Environment Variables ---
-    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+    env_file = os.getenv('ENV_FILE', '.env.local')
+    load_dotenv(os.path.join(os.path.dirname(__file__), env_file))
 
     # Database Configuration using environment variables
-    DB_NAME = os.getenv('DB_NAME')
-    DB_USER = os.getenv('DB_USER')
-    DB_PASSWORD = os.getenv('DB_PASSWORD')
-    DB_HOST = os.getenv('DB_HOST')
-    DB_PORT = os.getenv('DB_PORT', '5432')  # Default PostgreSQL port
+    DB_NAME = os.getenv('POSTGRES_DB')
+    DB_USER = os.getenv('POSTGRES_USER')
+    DB_PASSWORD = os.getenv('POSTGRES_PASSWORD')
+    DB_HOST = os.getenv('POSTGRES_DB_HOST')
+    DB_PORT = os.getenv('POSTGRES_DB_PORT', '5432')  # Default PostgreSQL port
 
     # Configure SQLAlchemy - Use 'postgresql+psycopg2' driver
     app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}'
