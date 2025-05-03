@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY . /app
 
 # Expose port (adjust if your server uses a different port)
-EXPOSE 8000
+EXPOSE 5000
 
 # Default command (adjust if your entrypoint is different)
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8000"]
+CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
