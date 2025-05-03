@@ -7,9 +7,12 @@ services:
     env_file:
       - ./server/.env.docker
     volumes:
-      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./sql/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./sql/trivia_data.sql:/docker-entrypoint-initdb.d/trivia_data.sql:ro
+      - ./sql/02_load_data.sh:/docker-entrypoint-initdb.d/02_load_data.sh:ro
+      - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
 
   backend:
     build:
@@ -22,4 +25,8 @@ services:
       - FLASK_APP=__init__:app
     ports:
       - "5000:5000"
-    restart: always 
+    restart: always
+
+volumes:
+  db_data:
+    driver: local

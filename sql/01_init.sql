@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS trivia_questions (
     original_value SMALLINT,            -- Original clue value for reference
     original_round SMALLINT,            -- Original round for reference
     notes TEXT,
+    old_category_id INTEGER,
     FOREIGN KEY (category_id) REFERENCES categories(id)
 );
 

@@ -17,3 +17,4 @@ jeopardy/extras.json
 jeopardy/extracted.json
 .cursor
 .env.local
+sql/trivia_data.sql
