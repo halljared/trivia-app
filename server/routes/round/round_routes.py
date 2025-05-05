@@ -8,7 +8,7 @@ from ... import app
 
 round_bp = Blueprint('round', __name__)
 
-@round_bp.route('/api/rounds/<int:round_id>', methods=['GET'])
+@round_bp.route('/rounds/<int:round_id>', methods=['GET'])
 @require_auth
 def get_round(round_id):
     """Fetch a specific round and all its questions."""
@@ -68,7 +68,7 @@ def get_round(round_id):
         app.logger.error(f"Error fetching round {round_id}: {e}")
         return jsonify({'error': 'Failed to retrieve round data'}), 500
 
-@round_bp.route('/api/rounds/<int:round_id>/questions', methods=['GET'])
+@round_bp.route('/rounds/<int:round_id>/questions', methods=['GET'])
 @require_auth
 def get_round_questions(round_id):
     """Fetch all questions for a specific round using the normalized view."""
@@ -121,7 +121,7 @@ def get_round_questions(round_id):
         app.logger.error(f"Database error fetching questions for round {round_id}: {e}")
         return jsonify({'error': 'Failed to retrieve questions due to a database error'}), 500
 
-@round_bp.route('/api/rounds', methods=['POST'])
+@round_bp.route('/rounds', methods=['POST'])
 @require_auth
 def create_round():
     """Create a new round for a specific event."""
@@ -178,7 +178,7 @@ def create_round():
         app.logger.error(f"Error creating round for event {event_id}: {e}")
         return jsonify({'error': 'Could not create round'}), 500
 
-@round_bp.route('/api/rounds/<int:round_id>', methods=['DELETE'])
+@round_bp.route('/rounds/<int:round_id>', methods=['DELETE'])
 @require_auth
 def delete_round(round_id):
     """Soft delete a round by setting is_deleted to true."""

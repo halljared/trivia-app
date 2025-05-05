@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 event_bp = Blueprint('event', __name__)
 
-@event_bp.route('/api/events/my', methods=['GET'])
+@event_bp.route('/events/my', methods=['GET'])
 @require_auth
 def get_my_events():
     """Fetch all non-deleted events created by the authenticated user."""
@@ -45,7 +45,7 @@ def get_my_events():
         app.logger.error(f"Error fetching user events: {e}")
         return jsonify({'error': 'Failed to retrieve events'}), 500
 
-@event_bp.route('/api/events', methods=['POST'])
+@event_bp.route('/events', methods=['POST'])
 @require_auth
 def create_or_update_event():
     """Create a new event or update an existing one for the authenticated user."""
@@ -137,7 +137,7 @@ def create_or_update_event():
         app.logger.error(f"Error {'updating' if event_id else 'creating'} event (ID: {event_id}): {e}")
         return jsonify({'error': f'Could not {"update" if event_id else "create"} event'}), 500
 
-@event_bp.route('/api/events/<int:event_id>', methods=['GET'])
+@event_bp.route('/events/<int:event_id>', methods=['GET'])
 @require_auth
 def get_event(event_id):
     """Fetch an event and its associated rounds by event ID."""
@@ -198,7 +198,7 @@ def get_event(event_id):
     return jsonify(event_data)
 
 
-@event_bp.route('/api/events/<int:event_id>', methods=['DELETE'])
+@event_bp.route('/events/<int:event_id>', methods=['DELETE'])
 @require_auth
 def delete_event(event_id):
     """Soft delete an event by setting is_deleted to true."""

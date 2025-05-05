@@ -5,7 +5,7 @@ from flask import jsonify, request, Blueprint
 
 category_bp = Blueprint('category', __name__)
 
-@category_bp.route('/api/categories', methods=['GET'])
+@category_bp.route('/categories', methods=['GET'])
 def get_categories():
     """Get all available trivia categories."""
     categories = db.session.scalars(
@@ -15,7 +15,7 @@ def get_categories():
     # Construct response with camelCase keys (no change needed as keys were simple)
     return jsonify([{"id": c.id, "name": c.name} for c in categories])
 
-@category_bp.route('/api/categories/active', methods=['GET'])
+@category_bp.route('/categories/active', methods=['GET'])
 def get_active_categories():
     """Get categories that have a minimum number of questions."""
     min_questions = request.args.get('min_questions', default=80, type=int)
@@ -36,7 +36,7 @@ def get_active_categories():
     ]
     return jsonify(categories_data) # Return the transformed data
 
-@category_bp.route('/api/category/<int:category_id>/questions', methods=['GET'])
+@category_bp.route('/category/<int:category_id>/questions', methods=['GET'])
 def get_category_questions(category_id):
     """Get multiple random questions from a specific category."""
     count = min(request.args.get('count', default=10, type=int), 50) # Cap at 50

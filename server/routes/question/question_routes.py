@@ -8,7 +8,7 @@ from ... import app
 
 question_bp = Blueprint('question', __name__)
 
-@question_bp.route('/api/question', methods=['GET'])
+@question_bp.route('/question', methods=['GET'])
 def get_question():
     """Get a random trivia question, optionally filtered."""
     difficulty = request.args.get('difficulty')
@@ -41,7 +41,7 @@ def get_question():
     })
 
 
-@question_bp.route('/api/questions/user-generated', methods=['POST'])
+@question_bp.route('/questions/user-generated', methods=['POST'])
 @require_auth
 def add_user_generated_question():
     """Add a new user-generated question."""

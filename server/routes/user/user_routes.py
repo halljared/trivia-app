@@ -9,7 +9,7 @@ from flask import request, jsonify, Blueprint
 
 user_bp = Blueprint('user', __name__)
 
-@user_bp.route('/api/auth/register', methods=['POST'])
+@user_bp.route('/auth/register', methods=['POST'])
 def register():
     """Register a new user."""
     data = request.get_json()
@@ -51,7 +51,7 @@ def register():
         return jsonify({'error': 'Could not register user'}), 500
 
 
-@user_bp.route('/api/auth/login', methods=['POST'])
+@user_bp.route('/auth/login', methods=['POST'])
 def login():
     """Login a user and create a session."""
     data = request.get_json()
@@ -96,7 +96,7 @@ def login():
         return jsonify({'error': 'Could not process login'}), 500
 
 
-@user_bp.route('/api/auth/logout', methods=['POST'])
+@user_bp.route('/auth/logout', methods=['POST'])
 @require_auth
 def logout():
     """Logout a user by invalidating their session."""
@@ -120,7 +120,7 @@ def logout():
     return jsonify({'message': 'Logged out successfully'}) # Return success even if token was invalid/expired
 
 
-@user_bp.route('/api/auth/me', methods=['GET'])
+@user_bp.route('/auth/me', methods=['GET'])
 @require_auth
 def get_current_user():
     """Get the current authenticated user's information."""
