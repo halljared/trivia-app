@@ -34,16 +34,24 @@ def register():
     try:
         db.session.add(new_user)
         db.session.commit()
-        # Construct user data with camelCase keys
+        # Generate session token after user creation
+        session_token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        new_session = UserSession(user_id=new_user.id, session_token=session_token, expires_at=expires_at)
+        new_user.last_login = datetime.now(timezone.utc)
+        db.session.add(new_session)
+        db.session.commit()
         user_data = {
             'id': new_user.id,
             'username': new_user.username,
-            'email': new_user.email
-            # 'createdAt': new_user.created_at.isoformat() if new_user.created_at else None # Example if needed later
+            'email': new_user.email,
+            'createdAt': new_user.created_at.isoformat() if hasattr(new_user, 'created_at') and new_user.created_at else None,
+            'lastLogin': new_user.last_login.isoformat() if new_user.last_login else None
         }
         return jsonify({
             'message': 'User registered successfully',
-            'user': user_data
+            'user': user_data,
+            'sessionToken': session_token
         }), 201
     except Exception as e:
         db.session.rollback()
@@ -83,11 +91,12 @@ def login():
         user_data = {
             'id': user.id,
             'username': user.username,
-            'email': user.email
-            # 'lastLogin': user.last_login.isoformat() if user.last_login else None # Example if needed later
+            'email': user.email,
+            'createdAt': user.created_at.isoformat() if hasattr(user, 'created_at') and user.created_at else None,
+            'lastLogin': user.last_login.isoformat() if user.last_login else None
         }
         return jsonify({
-            'session_token': session_token, # Key is already fine
+            'sessionToken': session_token,
             'user': user_data
         })
     except Exception as e:
@@ -135,6 +144,6 @@ def get_current_user():
         'id': user.id,
         'username': user.username,
         'email': user.email,
-        'createdAt': user.created_at.isoformat() if user.created_at else None, # Renamed created_at
-        'lastLogin': user.last_login.isoformat() if user.last_login else None # Renamed last_login
+        'createdAt': user.created_at.isoformat() if user.created_at else None,
+        'lastLogin': user.last_login.isoformat() if user.last_login else None
     })
