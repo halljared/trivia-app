@@ -74,9 +74,9 @@ def create_or_update_event():
         if 'status' in data:
             event_data['status'] = data.get('status')
 
-        # Handle event_date separately due to conversion
-        if 'event_date' in data:
-            event_date_str = data.get('event_date')
+        # Handle eventDate separately due to conversion
+        if 'eventDate' in data:
+            event_date_str = data.get('eventDate')
             if event_date_str is None:
                  # Explicitly setting date to null
                  event_data['event_date'] = None
@@ -188,12 +188,12 @@ def get_event(event_id):
     event_data = {
         'id': event.id,
         'name': event.name,
-        'eventDate': event.event_date.isoformat() if event.event_date else None, # Renamed event_date
+        'eventDate': event.event_date.isoformat() if event.event_date else None,
         'status': event.status,
         'description': event.description,
         'rounds': rounds_data,
-        'createdAt': event.created_at.isoformat() if event.created_at else None, # Renamed created_at
-        'userId': event.user_id, # Added userId
+        'createdAt': event.created_at.isoformat() if event.created_at else None,
+        'userId': event.user_id,
     }
     return jsonify(event_data)
 
